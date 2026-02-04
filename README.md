@@ -27,7 +27,7 @@ AI Stack: Large Language Models (GPT, Claude, Gemini, xAI) & Trae/Cursor.
 * **Tech:** HTML5, JavaScript (ES6+), Tailwind CSS, Lucide Icons.
 * **Status:** 🔒 *Internal Source Code (Proprietary)*
 
-#### 2. VibeJSON: Algo-Trading Execution Bridge
+#### 2. VibeJSON: Algo-Trading Execution Bot aka Trading Bot
 *A Pine Script v6 Library for automated webhook signaling.*
 * **The Architecture:** TradingView alerts typically send raw text. This custom library acts as a middleware layer, serializing trading logic into precise JSON payloads compatible with execution platforms.
 * **Key Features:**
@@ -49,4 +49,10 @@ AI Stack: Large Language Models (GPT, Claude, Gemini, xAI) & Trae/Cursor.
 
 #### 4. Insights Storyteller
 *Automated Business Intelligence & Narrative Engine.*
-* **The Architecture:** A client-side React application that ingests raw recruitment metrics and utilizes Gemini 1.
+* **The Architecture:** A client-side React application that ingests raw recruitment metrics and utilizes Gemini 3 Flash to generate "Board-Ready" executive reports.
+* **Key Features:**
+    * **Privacy-First Architecture:** Implemented a client-side "PII Scrubber" toggle that sanitizes sensitive customer data (names, verbatim feedback) *before* the payload is sent to the AI model.
+    * **Multimodal Context:** The app accepts both raw integer data and screenshot uploads (Vision API), allowing the AI to "read" legacy dashboard screenshots to validate manual data entries.
+    * **Session Persistence:** Custom local-storage state management to prevent data loss during complex report generation sessions.
+* **Tech:** React, Gemini 1.5 Flash, Tailwind CSS, Lucide.
+* **Status:** 🔒 *Internal Source Code (Proprietary)*
