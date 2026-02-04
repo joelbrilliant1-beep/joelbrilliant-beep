@@ -1,0 +1,620 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { 
+  Sparkles, 
+  Briefcase, 
+  MapPin, 
+  Layout, 
+  Save, 
+  Share2, 
+  Check, 
+  ChevronRight, 
+  Cpu,
+  Fingerprint,
+  Clock,
+  Search,
+  FileText,
+  RefreshCw,
+  AlertCircle,
+  ArrowRight,
+  Minimize2,
+  Maximize2,
+  X,
+  MessageSquare,
+  HelpCircle,
+  UploadCloud,
+  File,
+  Trash2,
+  Megaphone,
+  Mail,
+  Linkedin,
+  ListOrdered,
+  Footprints,
+  MessageCircle,
+  Zap,
+  BarChart3,
+  Menu,
+  Smartphone,
+  Monitor,
+  DollarSign,
+  Heart,
+  Wand2,
+  Globe,
+  Download,
+  Terminal,
+  Plus,
+  Edit3,
+  ChevronLeft
+} from 'lucide-react';
+
+// --- CONSTANTS ---
+const traitCategories = {
+  'retail': ["Customer Focus", "Resilience", "Upselling", "Product Knowledge", "Teamwork", "Reliability"],
+  'store': ["Customer Focus", "Inventory Management", "Merchandising", "Teamwork", "Reliability"],
+  'sales': ["Negotiation", "Closing Skills", "Prospecting", "Relationship Management", "Resilience", "Drive for Results"],
+  'account': ["Relationship Building", "Strategic Planning", "Client Success", "Negotiation", "Communication"],
+  'engineer': ["System Design", "Coding Standards", "Problem Solving", "Technical Communication", "Debugging", "Continuous Learning"],
+  'developer': ["Clean Code", "Problem Solving", "Agile Mindset", "Debugging", "Continuous Learning"],
+  'design': ["User Empathy", "Visual Hierarchy", "Prototyping", "Design Systems", "Creativity", "Attention to Detail"],
+  'product': ["Strategic Vision", "User Centricity", "Data Analysis", "Prioritization", "Stakeholder Management"],
+  'manager': ["Team Leadership", "Delegation", "Strategic Planning", "Coaching", "Conflict Resolution", "Emotional Intelligence"],
+  'lead': ["Mentorship", "Technical Leadership", "Decision Making", "Accountability", "Communication"],
+  'data': ["Analytical Thinking", "Data Visualization", "Statistical Analysis", "Attention to Detail", "Pattern Recognition"],
+  'marketing': ["Content Strategy", "Market Research", "Creativity", "Brand Storytelling", "Data Analysis"],
+  'customer': ["Empathy", "Patience", "Communication", "Conflict Resolution", "Problem Solving"],
+  'admin': ["Organization", "Time Management", "Attention to Detail", "Communication", "Proactivity"],
+  'finance': ["Financial Analysis", "Compliance", "Accuracy", "Risk Management", "Fiscal Responsibility"]
+};
+
+const defaultTraits = [
+  "Strategic Agility", "Emotional Intelligence", "Data Fluency", 
+  "Creative Direction", "Systems Thinking", "Radical Candor",
+  "Customer Obsession", "Growth Mindset"
+];
+
+const benefitsList = [
+  "Remote Work", "Health Insurance", "401k/Super", "Unlimited PTO", 
+  "Learning Budget", "Parental Leave", "Gym/Wellness", "Equity/Stock"
+];
+
+const SAPIA_PROCESS_PRESET = `1. Quick Application (5 mins)
+2. Chat Interview powered by Sapia.ai (20-25 mins): Where everyone gets a chance to shine. Eligible candidates receive an instant interview – no waiting!
+3. Phone Screen: Connect with us to see if you're the right fit for our culture.
+4. In-person Interview: The final step to meet the team in person.`;
+
+// --- API HELPER ---
+const callGemini = async (prompt, schemaType, filePart = null) => {
+    const apiKey = ""; // Injected by environment
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+    let schema;
+
+    // Schema definitions
+    if (schemaType === 'jd') {
+      schema = {
+        type: "OBJECT",
+        properties: {
+          sections: {
+            type: "OBJECT",
+            properties: {
+              hook: { type: "STRING" },
+              opportunity: { type: "STRING" },
+              responsibilities: { type: "ARRAY", items: { type: "STRING" } },
+              successProfile: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, desc: { type: "STRING" } } } },
+              hiringProcess: { type: "ARRAY", items: { type: "STRING" } },
+              qualifications: { type: "ARRAY", items: { type: "STRING" } },
+              closing: { type: "STRING" }
+            }
+          },
+          dei_score: { type: "INTEGER" }
+        }
+      };
+    } else if (schemaType === 'section') {
+        schema = {
+            type: "OBJECT",
+            properties: {
+                content: { type: "STRING" }
+            }
+        };
+    } else if (schemaType === 'traits') {
+        schema = {
+            type: "OBJECT",
+            properties: {
+                traits: { type: "ARRAY", items: { type: "STRING" } }
+            }
+        };
+    }
+
+    try {
+      const parts = [{ text: prompt }];
+      if (filePart) parts.push(filePart);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: parts }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: schema
+          }
+        })
+      });
+
+      if (!response.ok) throw new Error('API call failed');
+      const data = await response.json();
+      return JSON.parse(data.candidates[0].content.parts[0].text);
+    } catch (error) {
+      console.error("Gemini API Error:", error);
+      return null;
+    }
+};
+
+export default function JdBuilder() {
+  // --- Global State ---
+  const [currentView, setCurrentView] = useState('studio'); // 'studio' | 'editor'
+  const [isGenerating, setIsGenerating] = useState(false);
+  
+  // --- Studio State ---
+  const [inputMode, setInputMode] = useState('create');
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const fileInputRef = useRef(null);
+  const [suggestedTraits, setSuggestedTraits] = useState(defaultTraits);
+  const [selectedTraits, setSelectedTraits] = useState([]);
+  const [customTraitInput, setCustomTraitInput] = useState(''); // New state for custom trait input
+  const [isRefreshingTraits, setIsRefreshingTraits] = useState(false); // New state for trait refreshing
+
+  const [formData, setFormData] = useState({
+    title: '',
+    department: '',
+    location: '',
+    type: 'Full Time',
+    existingText: '', 
+    hiringProcess: '',
+    tone: 'Professional',
+    salaryMin: '',
+    salaryMax: '',
+    currency: '$',
+    benefits: []
+  });
+
+  // --- Editor State ---
+  const [editorSections, setEditorSections] = useState([]);
+  const [activeSectionId, setActiveSectionId] = useState(null); // For AI generating specific section
+
+  // --- Handlers: Studio ---
+  useEffect(() => {
+    if (!formData.title) {
+      setSuggestedTraits(defaultTraits);
+      return;
+    }
+    const lowerTitle = formData.title.toLowerCase();
+    let matches = [];
+    Object.entries(traitCategories).forEach(([key, traits]) => {
+      if (lowerTitle.includes(key)) matches = [...matches, ...traits];
+    });
+    if (matches.length > 0) {
+      setSuggestedTraits(Array.from(new Set([...matches, ...defaultTraits])).slice(0, 10));
+    } else {
+      setSuggestedTraits(defaultTraits);
+    }
+  }, [formData.title]);
+
+  const handleInputChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+  const toggleTrait = (t) => setSelectedTraits(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
+  const toggleBenefit = (b) => setFormData(prev => ({ ...prev, benefits: prev.benefits.includes(b) ? prev.benefits.filter(x => x !== b) : [...prev.benefits, b] }));
+  
+  const handleMagicDraft = () => {
+      // Mock logic for demo
+      setFormData({ ...formData, department: "Engineering", location: "Remote", salaryMin: "120,000", salaryMax: "150,000", benefits: ["Remote Work", "Equity/Stock"], hiringProcess: SAPIA_PROCESS_PRESET });
+      setSelectedTraits(suggestedTraits.slice(0, 4));
+  };
+  const handleFileSelect = (e) => {
+      const file = e.target.files[0];
+      if (file) { setUploadedFile(file); setFormData({ ...formData, existingText: '' }); }
+  };
+
+  // --- New Handlers for Trait Customization ---
+  const handleAddCustomTrait = () => {
+    if (customTraitInput.trim()) {
+        const newTrait = customTraitInput.trim();
+        // Add to selected
+        setSelectedTraits([...selectedTraits, newTrait]);
+        // Also add to suggested so it renders as a chip, if not already there
+        if (!suggestedTraits.includes(newTrait)) {
+            setSuggestedTraits([...suggestedTraits, newTrait]);
+        }
+        setCustomTraitInput('');
+    }
+  };
+
+  const handleTraitRefresh = async () => {
+    if (!formData.title) return;
+    setIsRefreshingTraits(true);
+    const prompt = `List 10 relevant professional competencies, soft skills, or personality traits for a ${formData.title} role${formData.department ? ` in ${formData.department}` : ''}. Return simple 1-3 word phrases like 'Strategic Thinking' or 'Python'.`;
+    
+    const result = await callGemini(prompt, 'traits');
+    if (result && result.traits) {
+        setSuggestedTraits(result.traits);
+    }
+    setIsRefreshingTraits(false);
+  };
+
+
+  // --- Handlers: Generation ---
+  const fileToGenerativePart = async (file) => {
+    const base64EncodedDataPromise = new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result.split(',')[1]);
+      reader.readAsDataURL(file);
+    });
+    return { inlineData: { data: await base64EncodedDataPromise, mimeType: file.type } };
+  };
+
+  const generateSmartJD = async () => {
+    setIsGenerating(true);
+    let prompt = "";
+    let filePart = null;
+    
+    const baseContext = `Role: ${formData.title}, Dept: ${formData.department}, Loc: ${formData.location}. Tone: ${formData.tone}. Traits: ${selectedTraits.join(', ')}.`;
+    
+    if (inputMode === 'create') {
+        prompt = `Write a Job Description. ${baseContext} Include Salary: ${formData.salaryMin}-${formData.salaryMax}. Benefits: ${formData.benefits.join(', ')}. Process: ${formData.hiringProcess}. Output JSON with sections.`;
+    } else {
+        if (uploadedFile) filePart = await fileToGenerativePart(uploadedFile);
+        prompt = `Refine this Job Description. ${baseContext} Keep original intent but improve tone/clarity. Output JSON with sections.`;
+    }
+
+    const result = await callGemini(prompt, 'jd', filePart);
+
+    if (result) {
+        // Transform API response into Editor Sections
+        const newSections = [
+            { id: 'header', title: 'Header', type: 'meta', content: { title: formData.title, dept: formData.department, loc: formData.location } },
+            { id: 'hook', title: 'The Hook', type: 'text', content: result.sections.hook },
+            { id: 'opportunity', title: 'The Opportunity', type: 'text', content: result.sections.opportunity },
+            { id: 'responsibilities', title: 'Key Responsibilities', type: 'list', content: result.sections.responsibilities },
+            { id: 'success', title: 'Success Profile', type: 'profile', content: result.sections.successProfile },
+            { id: 'hiring', title: 'Candidate Journey', type: 'list', content: result.sections.hiringProcess || [] },
+            { id: 'closing', title: 'Why Join Us', type: 'text', content: result.sections.closing },
+        ];
+        setEditorSections(newSections);
+        setCurrentView('editor');
+    } else {
+        alert("Generation failed. Please try again.");
+    }
+    setIsGenerating(false);
+  };
+
+  // --- Handlers: Editor ---
+  const updateSectionContent = (id, newContent) => {
+      setEditorSections(prev => prev.map(s => s.id === id ? { ...s, content: newContent } : s));
+  };
+
+  const removeSection = (id) => {
+      setEditorSections(prev => prev.filter(s => s.id !== id));
+  };
+
+  const addSection = (type) => {
+      const id = Date.now().toString();
+      const newSection = {
+          id,
+          title: type === 'experience' ? 'Work Experience' : type === 'availability' ? 'Availability' : 'New Section',
+          type: 'text', // default to text for simplicity in this demo
+          content: '' 
+      };
+      // Insert before the last section (usually closing)
+      const index = editorSections.length - 1;
+      const newArr = [...editorSections];
+      newArr.splice(index, 0, newSection);
+      setEditorSections(newArr);
+  };
+
+  const generateSectionContent = async (section) => {
+      setActiveSectionId(section.id);
+      const prompt = `Write a ${section.title} section for a ${formData.title} role. Context: ${formData.department}, ${formData.location}. Tone: ${formData.tone}. Keep it concise and engaging.`;
+      const result = await callGemini(prompt, 'section');
+      if (result) {
+          updateSectionContent(section.id, result.content);
+      }
+      setActiveSectionId(null);
+  };
+
+  // --- RENDERERS ---
+
+  const renderStudio = () => (
+    <div className="max-w-4xl mx-auto px-6 pt-32 pb-20">
+        <header className="mb-20 text-center">
+          <div className="inline-flex items-center gap-2 mb-6 px-4 py-1.5 rounded-full bg-black/5 border border-black/5 backdrop-blur-sm">
+            <span className="w-2 h-2 rounded-full bg-black animate-pulse"></span>
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">Sapia.ai Intelligence</span>
+          </div>
+          <h1 className="text-7xl md:text-9xl font-bold tracking-tighter leading-[0.85] text-black mb-8">
+            JD Studio <span className="text-white bg-black px-4 rounded-[2rem] py-1 inline-block transform -rotate-2">Pro</span>
+          </h1>
+          <p className="text-xl text-black/60 max-w-2xl mx-auto font-medium">
+            Architect high-converting position descriptions in seconds.
+          </p>
+        </header>
+
+        <div className="bg-white rounded-[3rem] p-8 md:p-12 shadow-2xl shadow-[#FFCEFF]/50 border border-white/50 flex flex-col gap-10">
+            {/* Mode Toggle */}
+            <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold tracking-tight">Job Analysis</h2>
+                <div className="flex bg-black/5 p-1 rounded-full">
+                    <button onClick={() => setInputMode('create')} className={`px-6 py-2 rounded-full text-xs font-bold transition-all ${inputMode === 'create' ? 'bg-black text-white shadow-md' : 'text-black/40 hover:text-black'}`}>Create</button>
+                    <button onClick={() => setInputMode('refine')} className={`px-6 py-2 rounded-full text-xs font-bold transition-all ${inputMode === 'refine' ? 'bg-black text-white shadow-md' : 'text-black/40 hover:text-black'}`}>Refine</button>
+                </div>
+            </div>
+
+            {/* Form */}
+            <div className="space-y-8">
+                {/* Title & Magic Draft */}
+                <div className="space-y-4">
+                    <div className="group relative">
+                        <label className="block text-xs font-bold ml-4 mb-2 text-black/40 uppercase tracking-widest">Role Title</label>
+                        <div className="relative">
+                            <input 
+                                type="text" name="title" value={formData.title} onChange={handleInputChange} 
+                                placeholder="e.g. Senior Product Manager"
+                                className="w-full bg-[#FFCEFF]/10 hover:bg-[#FFCEFF]/20 focus:bg-white border border-transparent focus:border-black/10 rounded-2xl px-6 py-4 text-lg font-medium outline-none transition-all"
+                            />
+                            {formData.title && !formData.department && (
+                                <button onClick={handleMagicDraft} className="absolute right-2 top-2 bottom-2 px-4 rounded-xl bg-black text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 hover:scale-105 transition-transform shadow-lg">
+                                    <Wand2 size={14} className="text-[#FFCEFF]" /> Auto-Fill
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-xs font-bold ml-4 mb-2 text-black/40 uppercase tracking-widest">Department</label>
+                            <input type="text" name="department" value={formData.department} onChange={handleInputChange} placeholder="e.g. Product" className="w-full bg-[#FFCEFF]/10 hover:bg-[#FFCEFF]/20 focus:bg-white border border-transparent focus:border-black/10 rounded-2xl px-6 py-4 text-base font-medium outline-none transition-all" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold ml-4 mb-2 text-black/40 uppercase tracking-widest">Location</label>
+                            <input type="text" name="location" value={formData.location} onChange={handleInputChange} placeholder="e.g. Remote" className="w-full bg-[#FFCEFF]/10 hover:bg-[#FFCEFF]/20 focus:bg-white border border-transparent focus:border-black/10 rounded-2xl px-6 py-4 text-base font-medium outline-none transition-all" />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Refine File Upload */}
+                {inputMode === 'refine' && (
+                    <div className="group relative border-2 border-dashed border-black/5 hover:border-black/20 rounded-3xl p-8 transition-colors cursor-pointer bg-[#FFCEFF]/5 hover:bg-white" onClick={() => fileInputRef.current?.click()}>
+                        <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept="application/pdf" className="hidden" />
+                        <div className="flex flex-col items-center gap-3 text-center">
+                            {uploadedFile ? (
+                                <>
+                                    <div className="p-3 bg-black rounded-full text-white"><FileText size={24} /></div>
+                                    <p className="font-bold text-lg">{uploadedFile.name}</p>
+                                    <p className="text-xs text-black/40 uppercase tracking-widest">Click to change file</p>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="p-3 bg-white rounded-full text-black shadow-md"><UploadCloud size={24} /></div>
+                                    <p className="font-bold text-lg">Upload PDF Job Description</p>
+                                    <p className="text-sm text-black/40">We'll analyze structure and bias</p>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Salary */}
+                <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-black/40"><DollarSign size={16} /><span className="text-[10px] font-bold uppercase tracking-[0.2em]">Comp & Perks</span></div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <input type="text" name="salaryMin" value={formData.salaryMin} onChange={handleInputChange} placeholder="Min Salary" className="w-full bg-[#FFCEFF]/10 hover:bg-[#FFCEFF]/20 focus:bg-white border border-transparent focus:border-black/10 rounded-2xl px-6 py-4 outline-none" />
+                        <input type="text" name="salaryMax" value={formData.salaryMax} onChange={handleInputChange} placeholder="Max Salary" className="w-full bg-[#FFCEFF]/10 hover:bg-[#FFCEFF]/20 focus:bg-white border border-transparent focus:border-black/10 rounded-2xl px-6 py-4 outline-none" />
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {benefitsList.map(b => (
+                            <button key={b} onClick={() => toggleBenefit(b)} className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${formData.benefits.includes(b) ? 'bg-black text-white border-black transform scale-105' : 'bg-white text-black/50 border-black/5 hover:border-black/20'}`}>{b}</button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Traits - UPDATED */}
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between text-black/40">
+                        <div className="flex items-center gap-2">
+                            <Fingerprint size={16} /><span className="text-[10px] font-bold uppercase tracking-[0.2em]">Success Profile</span>
+                        </div>
+                        <button 
+                            onClick={handleTraitRefresh} 
+                            disabled={isRefreshingTraits || !formData.title}
+                            className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-black hover:text-[#FFCEFF] bg-transparent hover:bg-black px-2 py-1 rounded-full transition-all disabled:opacity-50"
+                        >
+                            <Sparkles size={12} className={isRefreshingTraits ? "animate-spin" : ""} />
+                            {isRefreshingTraits ? 'Analysing...' : 'AI Suggest'}
+                        </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {suggestedTraits.map(t => (
+                            <button key={t} onClick={() => toggleTrait(t)} className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${selectedTraits.includes(t) ? 'bg-black text-white border-black transform scale-105 shadow-md' : 'bg-white text-black/50 border-black/5 hover:border-black/20'}`}>{t}</button>
+                        ))}
+                    </div>
+                    {/* Manual Add Trait */}
+                    <div className="flex gap-2">
+                        <input 
+                            type="text" 
+                            placeholder="Add custom trait..." 
+                            value={customTraitInput}
+                            onChange={(e) => setCustomTraitInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleAddCustomTrait()}
+                            className="flex-1 bg-[#FFCEFF]/10 hover:bg-[#FFCEFF]/20 focus:bg-white rounded-xl px-4 py-2 text-xs font-medium outline-none transition-all placeholder:text-black/30"
+                        />
+                        <button 
+                            onClick={handleAddCustomTrait}
+                            disabled={!customTraitInput.trim()}
+                            className="bg-black text-white p-2 rounded-xl hover:scale-105 transition-transform disabled:opacity-50"
+                        >
+                            <Plus size={16} />
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <button 
+                onClick={generateSmartJD}
+                disabled={isGenerating || !formData.title}
+                className="w-full bg-black text-white rounded-full py-6 text-xl font-bold tracking-tight hover:scale-[1.01] active:scale-[0.99] transition-all relative overflow-hidden shadow-xl shadow-black/10 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+                {isGenerating ? (
+                    <div className="flex items-center justify-center gap-2">
+                        <div className="w-2 h-2 bg-[#FFCEFF] rounded-full animate-bounce"></div>
+                        <div className="w-2 h-2 bg-[#FFCEFF] rounded-full animate-bounce delay-100"></div>
+                        <div className="w-2 h-2 bg-[#FFCEFF] rounded-full animate-bounce delay-200"></div>
+                    </div>
+                ) : (
+                    <div className="flex items-center justify-center gap-2"><Sparkles className="text-[#FFCEFF]" /><span>GENERATE</span></div>
+                )}
+            </button>
+        </div>
+    </div>
+  );
+
+  const renderEditor = () => (
+    <div className="min-h-screen flex flex-col bg-[#FFCEFF]">
+        {/* Editor Nav */}
+        <div className="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-md border-b border-white/50 z-50 px-6 py-4 flex items-center justify-between">
+            <button onClick={() => setCurrentView('studio')} className="flex items-center gap-2 text-sm font-bold text-black/60 hover:text-black transition-colors bg-white/50 px-4 py-2 rounded-full hover:bg-white">
+                <ChevronLeft size={18} /> Back to Studio
+            </button>
+            <div className="flex items-center gap-3">
+                <div className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold flex items-center gap-1 uppercase tracking-wider"><Check size={12} /> Saved</div>
+                <button className="bg-black text-white px-6 py-2 rounded-full text-sm font-bold hover:bg-black/80 transition-colors shadow-lg flex items-center gap-2">
+                    <Download size={16} /> Export PDF
+                </button>
+            </div>
+        </div>
+
+        {/* Editor Canvas */}
+        <div className="flex-1 pt-24 pb-32 px-4 md:px-8 max-w-5xl mx-auto w-full">
+            
+            {/* Component List */}
+            <div className="space-y-6">
+                {editorSections.map((section, index) => (
+                    <div key={section.id} className="bg-white rounded-[2.5rem] p-10 shadow-xl shadow-[#FFCEFF]/50 border border-white/50 group relative transition-all hover:shadow-2xl">
+                        
+                        {/* Section Actions */}
+                        <div className="absolute top-6 right-6 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {section.type !== 'meta' && (
+                                <>
+                                    <button 
+                                        onClick={() => generateSectionContent(section)}
+                                        className="p-2.5 bg-black text-white rounded-full hover:scale-110 transition-transform shadow-md" 
+                                        title="Auto-Write with AI"
+                                    >
+                                        {activeSectionId === section.id ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} className="text-[#FFCEFF]" />}
+                                    </button>
+                                    <button 
+                                        onClick={() => removeSection(section.id)}
+                                        className="p-2.5 bg-white border border-black/5 text-red-500 rounded-full hover:bg-red-50 transition-colors shadow-sm"
+                                        title="Remove Section"
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
+                                </>
+                            )}
+                        </div>
+
+                        {/* Section Content */}
+                        <div>
+                            {section.type === 'meta' ? (
+                                <div className="border-b border-black/5 pb-8 mb-4">
+                                    <h1 className="text-5xl md:text-7xl font-bold tracking-tighter mb-6 leading-[0.9]">{section.content.title}</h1>
+                                    <div className="flex flex-wrap gap-3">
+                                        <span className="bg-black text-white px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider">{section.content.dept}</span>
+                                        <span className="bg-black/5 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider">{section.content.loc}</span>
+                                        {formData.salaryMin && (
+                                            <span className="bg-[#FFCEFF] text-black px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1">
+                                                <DollarSign size={12} /> {formData.salaryMin} - {formData.salaryMax}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : section.type === 'profile' && Array.isArray(section.content) ? (
+                                <>
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <Fingerprint size={20} className="text-black" />
+                                        <h3 className="text-xs font-bold uppercase tracking-[0.25em] text-black/40">{section.title}</h3>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {section.content.map((trait, i) => (
+                                            <div key={i} className="bg-neutral-50 p-4 rounded-2xl border border-neutral-100">
+                                                <input 
+                                                    className="w-full bg-transparent font-bold text-sm mb-1 outline-none text-black"
+                                                    defaultValue={trait.name}
+                                                />
+                                                <textarea 
+                                                    className="w-full bg-transparent resize-none outline-none text-sm font-light text-black/70"
+                                                    rows={3}
+                                                    defaultValue={trait.desc}
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="flex items-center gap-3 mb-6">
+                                        {section.id === 'hook' && <Zap size={20} className="text-black" />}
+                                        {section.id === 'responsibilities' && <ListOrdered size={20} className="text-black" />}
+                                        <h3 className="text-xs font-bold uppercase tracking-[0.25em] text-black/40">{section.title}</h3>
+                                    </div>
+                                    
+                                    {/* Editable Area */}
+                                    {section.type === 'list' && Array.isArray(section.content) ? (
+                                        <ul className="space-y-4">
+                                            {section.content.map((item, i) => (
+                                                <li key={i} className="flex items-start gap-4">
+                                                    <div className="mt-2 w-1.5 h-1.5 rounded-full bg-black shrink-0"></div>
+                                                    <textarea 
+                                                        className="w-full bg-transparent resize-none outline-none text-xl font-light leading-relaxed h-auto text-black/80 placeholder:text-black/20"
+                                                        rows={2}
+                                                        defaultValue={item}
+                                                    />
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : (
+                                        <textarea 
+                                            className="w-full bg-transparent resize-none outline-none text-xl font-light leading-relaxed h-auto min-h-[120px] text-black/80 placeholder:text-black/20"
+                                            value={typeof section.content === 'string' ? section.content : ''}
+                                            onChange={(e) => updateSectionContent(section.id, e.target.value)}
+                                            placeholder={`Drafting ${section.title}...`}
+                                        />
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Add Component Menu */}
+            <div className="mt-16 text-center">
+                <div className="inline-flex bg-white p-2 rounded-full shadow-2xl shadow-[#FFCEFF]/50 border border-white/50 gap-2">
+                    <button onClick={() => addSection('experience')} className="px-6 py-3 rounded-full text-xs font-bold hover:bg-black hover:text-white flex items-center gap-2 transition-all group">
+                        <Briefcase size={14} className="text-black/40 group-hover:text-white" /> Add Experience
+                    </button>
+                    <button onClick={() => addSection('availability')} className="px-6 py-3 rounded-full text-xs font-bold hover:bg-black hover:text-white flex items-center gap-2 transition-all group">
+                        <Clock size={14} className="text-black/40 group-hover:text-white" /> Add Availability
+                    </button>
+                    <button onClick={() => addSection('custom')} className="px-6 py-3 rounded-full text-xs font-bold hover:bg-black hover:text-white flex items-center gap-2 transition-all group">
+                        <Plus size={14} className="text-black/40 group-hover:text-white" /> Custom Section
+                    </button>
+                </div>
+                <p className="mt-6 text-black/30 text-[10px] font-bold uppercase tracking-[0.2em]">Customize your JD Architecture</p>
+            </div>
+
+        </div>
+    </div>
+  );
+
+  return (
+    <div className="font-sans selection:bg-black selection:text-[#FFCEFF] min-h-screen bg-[#FFCEFF]">
+        {currentView === 'studio' ? renderStudio() : renderEditor()}
+    </div>
+  );
+}
