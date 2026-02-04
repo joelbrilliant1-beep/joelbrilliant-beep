@@ -6,7 +6,7 @@ Role: Senior Solutions Engineer @ Sapia.ai
 
 Focus: Developer Experience, Automation, Vibe Coding.
 
-Stack: Python, Streamlit, OpenAI/xAi/Gemini/Claude API, React, HTML/JavaScript, Trae, etc.
+AI Stack: Large Language Models (GPT, Claude, Gemini, xAI) & Trae/Cursor.
 
 ### 🛠 Tech Stack
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
